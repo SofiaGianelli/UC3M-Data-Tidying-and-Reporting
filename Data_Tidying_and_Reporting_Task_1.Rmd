@@ -1,0 +1,215 @@
+---
+title: "Data Tidying and Reporting"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+fontsize: 10pt
+geometry: margin=2cm
+bibliography: references.bib
+biblio-style: apalike
+---
+
+## Introduction
+
+The aim of this task is to identify and classify handwritten digits using a ridge logistic regression model. The dataset contains images of the digit 0 to 9 (10 in total). In the first part, a ridge model was implemented using cross-validation to classify the digits 4 and 9. Then, in the last part, the objective was to create 45 different classifications between each pair of digits.
+
+## Classifying the digits 4 and 9
+
+```{r packages, echo=FALSE, warning=FALSE, error=FALSE, message=FALSE}
+load("qmnist_nist.RData")
+library(glmnet)
+library(ggplot2)
+library(pander)
+library(dplyr)
+set.seed(123)
+```
+
+```{r image, echo=FALSE}
+show_digit <- function(x, col = gray(255:1 / 255), ...) {
+  l <- sqrt(length(x))
+  image(matrix(as.numeric(x), nrow = l)[, l:1], col = col, ...)
+}
+```
+
+```{r digits, echo=FALSE,eval=FALSE}
+i <- 10
+train_nist$digit[i]
+```
+
+```{r train data, echo=FALSE}
+# Filter train data for digits 4 and 9
+subset_train <- train_nist$digit %in% c(4, 9)
+x_4_9 <- train_nist$px[subset_train, ]
+y_4_9 <- train_nist$digit[subset_train]
+
+# Adapt train data
+x_4_9 <- as.matrix(x_4_9)
+y_4_9 <- ifelse(y_4_9 == "4", 1, 0)
+```
+
+The first step was to prepare the data for the implementation of the ridge model and cross-validation. We separated the data set to identify the digits '4' and '9'. Following this, we transformed the predictors into a matrix and the response variable into a binary format, where it takes a value of 1 for the digit '4' and 0 for the digit '9'.
+
+## Cross-Validation and Ridge Model
+
+```{r cross validation, echo=FALSE, eval=FALSE}
+crossvalidation <- cv.glmnet(
+  x = x_4_9, y = y_4_9, alpha = 0, 
+  family = "binomial", nfolds = 5, 
+  standardize = FALSE
+)
+lambda_min <- crossvalidation$lambda.min
+```
+
+```{r ridge model,echo=FALSE}
+# Minimum lambda
+lambda_min <- 24.1184654566335
+ridge_model <- glmnet(
+  x = x_4_9, y = y_4_9, alpha = 0, family = "binomial",
+  lambda = lambda_min, standardize = FALSE) 
+#don't have to standardize the predictors
+```
+
+This section covers the implementation of the ridge model and the cross-validation-chosen $\lambda$ penalty, the cross-validation method consist on performing several models until finding the model with the smallest $\lambda$ that minimize the error. According to [@Friedman2010], _"from a Bayesian point of view, the ridge penalty is ideal if there are many predictors, and all have non-zero coefficients drawn from a Gaussian distribution"_. In this case, the total of predictor is 785 so the best option was to do the cross-validation-chosen $\lambda$ penalty and the $\lambda$ minimum obtained was $\approx$ 24.12, and this value was used to predict and find the $\beta's$ coefficients.
+
+It's important to note that the predictors aren't standardized. Standardizing the predictors is useful when they are in different scale and this is not our case, so it's unnecessary to standardize them.
+
+## Estimated beta's
+
+```{r betas plot, echo=FALSE, fig.width=6, fig.height=3}
+# Predictions
+coeff <- predict(ridge_model, type = "coefficients", s = lambda_min)
+coeff <- as.vector(coeff)
+ggplot(
+  data.frame(Index = seq_along(coeff[-1]), Coefficient_Value = coeff[-1]),
+  aes(x = Index, y = Coefficient_Value)
+) +
+  geom_point(color = "blueviolet", size = 1) +
+  geom_line(color = "blueviolet", lwd = 0.5) +
+  labs(
+    x = "Index", y = "Coefficient Value",
+    title = "Ridge Regression Coefficients"
+  ) +
+  theme(
+    axis.title.x = element_text(size = 8),
+    plot.title = element_text(size = 10),
+    axis.title.y = element_text(size = 8)
+  )
+```
+
+To have a nice plot, we decided to omit the intercept, because it is much bigger than the rest of the coefficient. The model has 785 coefficients so the plot it's not clear enough, however it's possible to see that we have more negative coefficient than positive.
+
+## Prediction accuracy of the model
+
+Once the $\beta's$ coefficients were predicted the next step is to calculate the accuracy of the model trained with the test data.
+
+```{r test data, echo=FALSE}
+# Filter test data for digits 4 and 9
+subset_test <- test_nist$digit %in% c(4, 9)
+x_test_4_9 <- test_nist$px[subset_test, ]
+y_test_4_9 <- test_nist$digit[subset_test]
+
+# Adapt test data
+x_test_4_9 <- as.matrix(x_test_4_9)
+y_test_4_9 <- ifelse(y_test_4_9 == "4", 1, 0)
+```
+
+```{r accuracy, echo=FALSE,include=FALSE}
+# Predictions
+test_predic <- predict(ridge_model, 
+  newx = x_test_4_9,
+  s = lambda_min, type = "response"
+)
+test_predicted <- ifelse(test_predic > 0.5, 1, 0)
+
+# Accuracy
+accuracy <- mean(test_predicted == y_test_4_9)
+print(round(accuracy, 4))
+```
+
+The accuracy of the ridge model trained is `r accuracy` which tells us how good it is at identifying the digit '4' and '9' based on the data it's been trained on.
+
+## 45 classification problems of one digit versus another
+
+In this part we created a loop to compute each of the 45 models, doing the cross-validation and storing the accuracy of the prediction of each digit's pair. As the code is extensive and the time consuming is too much, the code was omitted, and the accuracy matrix was compute manually.
+
+```{r 45 classification,eval=FALSE,echo=FALSE}
+digits <- 0:9
+accuracy_matrix <- matrix(0, nrow = 10, ncol = 10, dimnames = list(as.character(digits), as.character(digits)))
+
+for (i in digits) {
+  for (j in digits) {
+    if (i < j) {
+      # Adapt train data
+      final_train <- train_nist$digit %in% c(i, j)
+      x_final_train <- train_nist$px[final_train, ]
+      y_final_train <- train_nist$digit[final_train]
+      x_final_train <- as.matrix(x_final_train)
+      y_final_train <- ifelse(y_final_train == i, 1, 0)
+
+      # Adapt test data
+      final_test <- test_nist$digit %in% c(i, j)
+      x_final_test <- test_nist$px[final_test, ]
+      x_final_test <- as.matrix(x_final_test)
+      y_final_test <- test_nist$digit[final_test]
+      y_final_test <- ifelse(y_final_test == i, 1, 0)
+
+      # Final Cross Validation
+      final_crossvalidation <- cv.glmnet(
+        x = x_final_train, y = y_final_train, alpha = 0,
+        family = "binomial", nfolds = 5, standardize = FALSE
+      )
+
+      # Lambda minimum
+      final_lambda <- final_crossvalidation$lambda.min
+
+      # Final Ridge model
+      final_ridge_model <- glmnet(
+        x = x_final_train, y = y_final_train, alpha = 0,
+        lambda = final_lambda, family = "binomial",
+        standardize = FALSE
+      )
+
+      # Prediction
+      final_predic <- predict(final_ridge_model,
+        newx = x_final_test, type = "response"
+      )
+      final_predicted <- ifelse(final_predic > 0.5, 1, 0)
+
+      # Accuracy
+      final_accuracy <- mean(final_predicted == y_final_test)
+      accuracy_matrix[as.character(i), as.character(j)] <- final_accuracy
+    }
+  }
+}
+print(accuracy_matrix)
+```
+
+```{r accuracy matrix manually,echo=FALSE}
+final_accuracy_matrix <- matrix(c(
+  0, 0.9996938, 0.9925422, 0.9940961, 0.9973571, 0.9896266, 0.9933028, 0.9974579, 0.9934598, 0.9961996,
+  0, 0, 0.9979857, 0.9971006, 0.9987382, 0.9968699, 0.9992197, 0.9974164, 0.9900031, 0.9977911,
+  0, 0, 0, 0.9781871, 0.9897925, 0.9873817, 0.9902383, 0.9924389, 0.9819477, 0.9889521,
+  0, 0, 0, 0, 0.9970370, 0.9746770, 0.9980466, 0.9927158, 0.9724621, 0.9911082,
+  0, 0, 0, 0, 0, 0.9933834, 0.9947723, 0.9941003, 0.9935854, 0.9784983,
+  0, 0, 0, 0, 0, 0, 0.9895760, 0.9967421, 0.9759462, 0.9924866,
+  0, 0, 0, 0, 0, 0, 0, 0.9996759, 0.9938251, 0.9979757,
+  0, 0, 0, 0, 0, 0, 0, 0, 0.9943219, 0.9801639,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0.9891928,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+), nrow = 10, byrow = TRUE)
+```
+
+## Accuracy matrix for the 45 classifications
+
+```{r accuracy matrix,echo=FALSE}
+colnames(final_accuracy_matrix) <- c("0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
+rownames(final_accuracy_matrix) <- c("0", "1", "2", "3", "4", "5", "6", "7", "8", "9")
+pander(final_accuracy_matrix, digits = 3)
+```
+
+Notice that when the digits are very different in appearance, such as '0' and '1', the accuracy is perfect (1) or almost perfect. However, when the digits are more similar like '4' and '9' the accuracy is slightly lower. Moreover, the accuracy of the classification of each pair of digits is greater than $97\%$ in every case which is a great result.
+
+## References
+
+@glmnet_package @dplyr_package @ggplot2_package @pander_package

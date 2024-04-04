@@ -1,0 +1,180 @@
+---
+title: "Data Tidying and Reporting - Task 2"
+output: 
+  html_document
+  pdf_document
+date: "March, 2023"
+---
+
+```{r, echo=FALSE, warning=FALSE}
+# Required library
+library(png)
+library(shiny)
+library(jpeg)
+library(class)
+library(glmnet)
+# Load data
+load(file = "qmnist_nist.RData")
+# Visualization helper
+show_digit <- function(x, col = gray(255:1 / 255), ...) {
+  l <- sqrt(length(x))
+  image(matrix(as.numeric(x), nrow = l)[, l:1], col = col, ...)
+}
+```
+
+```{r, echo=FALSE, warning=FALSE}
+# Create test images to upload to the app
+for (i in 0:9) {
+  # Matrix with 0-1 entries
+  img_vec <- test_nist$px[which(test_nist$digit == i)[1], ] / 255
+  img_mat <- matrix(as.numeric(img_vec), nrow = 28, ncol = 28,
+                    byrow = TRUE) # Saves it with the right orientation
+  
+  # Save image
+writePNG(image = img_mat, target = paste0("test-", i, ".png"))
+}
+## Check that the reading is fine
+# Read image
+test_d <- 7 # Change me
+test_img <- readPNG(paste0("test-", test_d, ".png"))
+# Vectors with pixel values
+vec_with_original_img <- test_nist$px[which(test_nist$digit == test_d)[1], ]
+vec_with_read_img <- c(255 * t(test_img)) # Use scale 0-255 and flatten the
+# rotated image so that the layout is comparable to $px
+# The same!
+max(abs(vec_with_original_img - vec_with_read_img))
+par(mfrow = c(1, 1))
+show_digit(vec_with_original_img, axes = FALSE)
+show_digit(vec_with_read_img, axes = FALSE)
+```
+
+```{r}
+## Define classifiers
+# Create average images
+avg_train_images <- sapply(0:9, function(d) {
+colMeans(train_nist$px[train_nist$digit == d, ])
+})
+# Classifier function
+avg_classifier <- function(vec_img) {
+which.min(colMeans((avg_train_images - vec_img)**2)) - 1
+}
+# Visualize average train images
+par(mfrow = c(2, 5), mar = rep(0, 4))
+for (d in 1:10) {
+show_digit(avg_train_images[, d], axes = FALSE)
+}
+# k-Nearest Neighbors (KNN) Classifier
+knn_classifier <- function(new_image, k = 3) {
+  train_features <- t(apply(train_nist$px, 1, as.numeric))
+  train_labels <- train_nist$digit
+  
+  test_features <- as.numeric(new_image)
+  
+  predicted_label <- knn(train_features, test_features, train_labels, k = k)
+  return(predicted_label)
+}
+
+# Random Forest Classifier
+rf_classifier <- function(new_image) {
+  train_features <- train_nist$px
+  train_labels <- train_nist$digit
+  
+  # Train the random forest model
+  rf_model <- randomForest(train_features, y = train_labels)
+  
+  # Predict using the trained model
+  predicted_label <- predict(rf_model, newdata = new_image)
+  
+  return(predicted_label)
+}
+
+```
+
+
+```{r,echo=FALSE, warning=FALSE}
+# Define UI
+ui <- fluidPage(
+  titlePanel("MNIST Digits Classifier"),
+  sidebarLayout(
+    sidebarPanel(
+      fileInput("file", label="Upload an image file", accept = c(".png", ".jpg")),
+      br(),
+      selectInput("classifier", "Select a Classifier",
+                  choices = c("Average Image Classifier", "k-Nearest Neighbors", "Random Forest"))
+    ),
+    mainPanel(
+      imageOutput("uploaded_image"),
+      br(),
+      textOutput("prediction")
+    )
+  )
+)
+
+# Define server logic
+server <- function(input, output) {
+  
+  # Display uploaded image
+  output$uploaded_image <- renderImage({
+    inFile <- input$file
+    
+    if (is.null(inFile)) {
+      return(list(src = "", width = "200px")) 
+    } else {
+      # Read image based on file extension
+      file_ext <- tools::file_ext(inFile$name)
+      
+      if (tolower(file_ext) %in% c("png", "jpg", "jpeg")) {  # Check for PNG, JPG, and JPEG
+        if (tolower(file_ext) %in% c("png")) {
+          img <- readPNG(inFile$datapath)
+        } else {
+          img <- readJPEG(inFile$datapath)
+        }
+        list(src = inFile$datapath, width = "200px")
+      } else {
+        # Unsupported file format
+        return(list(src = "", width = "200px"))
+      }
+    }
+  }, deleteFile = FALSE)
+  
+  # Classify uploaded image
+  output$prediction <- renderText({
+    req(input$file)  
+    
+    # Extract file extension
+    file_ext <- tools::file_ext(input$file$name)
+    
+    # Check if the file extension is supported
+    if (tolower(file_ext) %in% c("png", "jpg", "jpeg")) {  
+      if (tolower(file_ext) %in% c("png")) {  
+        test_img <- readPNG(input$file$datapath)
+      } else {
+        test_img <- readJPEG(input$file$datapath)
+      }
+      
+      vec_with_read_img <- c(255 * t(test_img))
+      
+      # Perform classification based on selected classifier
+      if (input$classifier == "Average Image Classifier") {
+        prediction <- avg_classifier(vec_with_read_img)
+      } else if (input$classifier == "k-Nearest Neighbors") {
+        prediction <- knn_classifier(vec_with_read_img)
+      } else if (input$classifier == "Random Forest") {
+        prediction <- rf_classifier(vec_with_read_img)
+      }
+      
+      paste("Predicted Digit:", prediction)
+    } else {
+      # Unsupported file format
+      return("Unsupported file format. Please upload a PNG, JPG, or JPEG image.")
+    }
+  })
+}
+
+```
+
+```{r, messege=FALSE, warning=FALSE}
+# Run the application
+shinyApp(ui = ui, server = server)
+```
+
